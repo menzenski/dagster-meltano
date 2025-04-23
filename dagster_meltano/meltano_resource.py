@@ -6,13 +6,12 @@ from functools import cached_property, lru_cache
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 
-from dagster import DagsterLogManager, resource, Field
+from dagster import DagsterLogManager, resource, Field, PipesSubprocessClient
 from dagster_meltano.exceptions import MeltanoCommandError
 
 from dagster_meltano.job import Job
 from dagster_meltano.schedule import Schedule
 from dagster_meltano.utils import Singleton
-from dagster_shell import execute_shell_command
 
 STDOUT = 1
 
@@ -58,20 +57,32 @@ class MeltanoResource(metaclass=Singleton):
         Returns:
             str: The output of the command.
         """
-        output, exit_code = execute_shell_command(
-            f"{self.meltano_bin} {command}",
-            env={**self.default_env, **env},
-            output_logging="STREAM",
-            log=logger,
-            cwd=self.project_dir,
-        )
 
+        full_command = f"{self.meltano_bin} {command}"
+        merged_env = {**self.default_env, **env}
+        
+        logger.info(f"Executing command with PipesSubprocessClient: {full_command}")
+
+        client: PipesSubprocessClient = PipesSubprocessClient(
+            full_command,
+            env=merged_env,
+            cwd=self.project_dir,
+            write_unicode_logs=True,
+        )
+        
+        output = []
+        for line in client.get_output_lines():
+            output.append(line)
+            logger.info(line)
+            
+        exit_code = client.wait()
+        
         if exit_code != 0:
             raise MeltanoCommandError(
                 f"Command '{command}' failed with exit code {exit_code}"
             )
 
-        return output
+        return "\n".join(output)
 
     async def load_json_from_cli(self, command: List[str]) -> dict:
         """Use the Meltano CLI to load JSON data.
