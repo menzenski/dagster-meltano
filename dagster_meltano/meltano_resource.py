@@ -4,11 +4,10 @@ import logging
 import os
 from functools import cached_property
 from pathlib import Path
-from typing import Any, Union, Generator
+from typing import Any, Union, Generator, Dict, List
 
 import dagster as dg
 from pydantic import Field
-from dagster._core.execution.context.compute import OpExecutionContext
 
 from dagster_meltano.exceptions import MeltanoCommandError
 from dagster_meltano.job import Job
@@ -33,11 +32,11 @@ class MeltanoResource(dg.ConfigurableResource, metaclass=Singleton):
     )
     
     @property
-    def default_env(self) -> dict[str, str]:
+    def default_env(self) -> Dict[str, str]:
         """The default environment to use when running Meltano commands.
 
         Returns:
-            dict[str, str]: The environment variables.
+            Dict[str, str]: The environment variables.
         """
         return {
             "MELTANO_CLI_LOG_CONFIG": str(Path(__file__).parent / "logging.yaml"),
@@ -49,7 +48,7 @@ class MeltanoResource(dg.ConfigurableResource, metaclass=Singleton):
     def execute_command(
         self,
         command: str,
-        env: dict[str, str],
+        env: Dict[str, str],
         logger: Union[logging.Logger, dg.DagsterLogManager, None] = None,
     ) -> str:
         """Execute a Meltano command.
@@ -91,7 +90,7 @@ class MeltanoResource(dg.ConfigurableResource, metaclass=Singleton):
 
         return "\n".join(output)
 
-    async def load_json_from_cli(self, command: list[str]) -> dict[str, Any]:
+    async def load_json_from_cli(self, command: List[str]) -> Dict[str, Any]:
         """Use the Meltano CLI to load JSON data.
         Use asyncio to run multiple commands concurrently.
 
@@ -99,7 +98,7 @@ class MeltanoResource(dg.ConfigurableResource, metaclass=Singleton):
             command: The Meltano command to execute.
 
         Returns:
-            dict: The processed JSON data.
+            Dict[str, Any]: The processed JSON data.
         """
         # Create the subprocess, redirect the standard output into a pipe
         proc = await asyncio.create_subprocess_exec(
@@ -128,17 +127,17 @@ class MeltanoResource(dg.ConfigurableResource, metaclass=Singleton):
         return jobs, schedules
 
     @cached_property
-    def meltano_yaml(self) -> dict[str, Any]:
+    def meltano_yaml(self) -> Dict[str, Any]:
         """Asynchronously load the Meltano jobs and schedules.
 
         Returns:
-            dict: The Meltano jobs and schedules.
+            Dict[str, Any]: The Meltano jobs and schedules.
         """
         jobs, schedules = asyncio.run(self.gather_meltano_yaml_information())
         return {"jobs": jobs["jobs"], "schedules": schedules["schedules"]}
 
     @cached_property
-    def meltano_jobs(self) -> list[Job]:
+    def meltano_jobs(self) -> List[Job]:
         meltano_job_list = self.meltano_yaml["jobs"]
         return [
             Job(
@@ -149,19 +148,19 @@ class MeltanoResource(dg.ConfigurableResource, metaclass=Singleton):
         ]
 
     @cached_property
-    def meltano_schedules(self) -> list[Schedule]:
+    def meltano_schedules(self) -> List[Schedule]:
         meltano_schedule_list = self.meltano_yaml["schedules"]["job"]
-        schedule_list = [
+        schedule_list: List[Schedule] = [
             Schedule(meltano_schedule) for meltano_schedule in meltano_schedule_list
         ]
         return schedule_list
 
     @property
-    def meltano_job_schedules(self) -> dict[str, Schedule]:
+    def meltano_job_schedules(self) -> Dict[str, Schedule]:
         return {schedule.job_name: schedule for schedule in self.meltano_schedules}
 
     @property
-    def jobs(self) -> Generator[dict[str, Any], None, None]:
+    def jobs(self) -> Generator[Dict[str, Any], None, None]:
         for meltano_job in self.meltano_jobs:
             yield meltano_job.dagster_job
 

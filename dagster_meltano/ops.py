@@ -1,32 +1,24 @@
 from __future__ import annotations
 from functools import lru_cache
-from typing import TYPE_CHECKING, Dict, Optional, Any, Callable
+from typing import TYPE_CHECKING, Dict, Optional
 
-from dagster import (
-    In,
-    Nothing,
-    OpDefinition,
-    Out,
-    get_dagster_logger,
-    op,
-    Field,
-)
+import dagster as dg
+from pydantic import Field
 
 from dagster_meltano.utils import generate_dagster_name
 
 if TYPE_CHECKING:
     from dagster_meltano.meltano_resource import MeltanoResource
 
-dagster_logger = get_dagster_logger()
+dagster_logger = dg.get_dagster_logger()
 
 
 @lru_cache
 def meltano_command_op(
     command: str,
     dagster_name: Optional[str] = None,
-) -> OpDefinition:
-    """
-    Run `meltano <command>` using a Dagster op.
+) -> dg.OpDefinition:
+    """Run `meltano <command>` using a Dagster op.
 
     This factory is cached to make sure the same commands can be reused in the
     same repository.
@@ -37,22 +29,22 @@ def meltano_command_op(
             Defaults to None.
 
     Returns:
-        OpDefinition: The Dagster op definition.
+        dg.OpDefinition: The Dagster op definition.
     """
     dagster_name = dagster_name or generate_dagster_name(command)
     ins = {
-        "after": In(Nothing),
-        "env": In(
-            Optional[dict],
+        "after": dg.In(dg.Nothing),
+        "env": dg.In(
+            Optional[Dict[str, str]],
             description="Environment variables to inject into the Meltano process.",
             default_value={},
         ),
     }
     out = {
-        "logs": Out(str, description="The output logs of the Meltano command."),
+        "logs": dg.Out(str, description="The output logs of the Meltano command."),
     }
 
-    @op(
+    @dg.op(
         name=dagster_name,
         description=f"Run `meltano {command}`.",
         ins=ins,
@@ -61,7 +53,7 @@ def meltano_command_op(
         required_resource_keys={"meltano"},
         config_schema={
             "env": Field(
-                dict,
+                Dict[str, str],
                 description="Environment variables to inject into the Meltano run process.",
                 default_value={},
                 is_required=False,
@@ -69,8 +61,8 @@ def meltano_command_op(
         },
     )
     def dagster_op(
-        context,
-        env: Optional[dict],
+        context: dg.OpExecutionContext,
+        env: Optional[Dict[str, str]],
     ) -> str:
         """
         Run `meltano run <command>` using a Dagster op.
@@ -108,9 +100,8 @@ def meltano_command_op(
 @lru_cache
 def meltano_run_op(
     command: str,
-) -> OpDefinition:
-    """
-    Run `meltano run <command>` using a Dagster op.
+) -> dg.OpDefinition:
+    """Run `meltano run <command>` using a Dagster op.
 
     This factory is cached to make sure the same commands can be reused in the
     same repository.
@@ -119,7 +110,7 @@ def meltano_run_op(
         command: The Meltano command string to run.
 
     Returns:
-        OpDefinition: The Dagster op definition.
+        dg.OpDefinition: The Dagster op definition.
     """
     dagster_name = generate_dagster_name(command)
     return meltano_command_op(
@@ -127,27 +118,27 @@ def meltano_run_op(
     )
 
 
-@op(
+@dg.op(
     name=generate_dagster_name("meltano install"),
     description="Install all Meltano plugins",
-    ins={"after": In(Nothing)},
+    ins={"after": dg.In(dg.Nothing)},
     tags={"kind": "meltano"},
     required_resource_keys={"meltano"},
     config_schema={
         "env": Field(
-            dict,
+            Dict[str, str],
             description="Environment variables to inject into the Meltano run process.",
             default_value={},
             is_required=False,
         )
     },
 )
-def meltano_install_op(context) -> None:
+def meltano_install_op(context: dg.OpExecutionContext) -> None:
     """
     Run `meltano install` using a Dagster op.
 
     Args:
-        context: The Dagster op execution context.
+        context (dg.OpExecutionContext): The Dagster op execution context.
     """
     meltano_resource: MeltanoResource = context.resources.meltano
 
