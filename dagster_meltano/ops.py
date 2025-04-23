@@ -1,6 +1,7 @@
 from __future__ import annotations
 from functools import lru_cache
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Dict, Optional, Any, Callable
+
 from dagster import (
     In,
     Nothing,
@@ -18,8 +19,6 @@ if TYPE_CHECKING:
 
 dagster_logger = get_dagster_logger()
 
-STDOUT = 1
-
 
 @lru_cache
 def meltano_command_op(
@@ -33,8 +32,8 @@ def meltano_command_op(
     same repository.
 
     Args:
-        command (str): The Meltano command to run.
-        dagster_name (Optional[str], optional): The Dagster name to use for the op.
+        command: The Meltano command to run.
+        dagster_name: The Dagster name to use for the op.
             Defaults to None.
 
     Returns:
@@ -78,19 +77,27 @@ def meltano_command_op(
 
         Args:
             context: The Dagster op execution context.
+            env: Environment variables to inject into the Meltano process.
+
+        Returns:
+            str: The output logs of the Meltano command.
         """
         meltano_resource: MeltanoResource = context.resources.meltano
 
         # Get the environment variables from the config and
         # add them to the Meltano invoker
-        config_env = context.op_config.get("env")
+        config_env = context.op_config.get("env", {})
 
         # The environment variables are a combination of the ones from the
         # Dagster op input and the ones from the config
-        env = {**env, **config_env}
+        combined_env = {**(env or {}), **(config_env or {})}
 
         # Run the Meltano command
-        output = meltano_resource.execute_command(f"{command}", env, context.log)
+        output = meltano_resource.execute_command(
+            command=command, 
+            env=combined_env, 
+            logger=context.log
+        )
 
         # Return the logs
         return output
@@ -107,6 +114,12 @@ def meltano_run_op(
 
     This factory is cached to make sure the same commands can be reused in the
     same repository.
+
+    Args:
+        command: The Meltano command string to run.
+
+    Returns:
+        OpDefinition: The Dagster op definition.
     """
     dagster_name = generate_dagster_name(command)
     return meltano_command_op(
@@ -129,15 +142,22 @@ def meltano_run_op(
         )
     },
 )
-def meltano_install_op(context):
+def meltano_install_op(context) -> None:
     """
     Run `meltano install` using a Dagster op.
+
+    Args:
+        context: The Dagster op execution context.
     """
     meltano_resource: MeltanoResource = context.resources.meltano
 
     # Get the environment variables from the config and
     # add them to the Meltano invoker
-    config_env = context.op_config.get("env")
+    config_env = context.op_config.get("env", {})
 
     # Run the Meltano run command
-    meltano_resource.execute_command(f"install", config_env, context.log)
+    meltano_resource.execute_command(
+        command="install", 
+        env=config_env, 
+        logger=context.log
+    )

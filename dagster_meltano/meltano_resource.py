@@ -2,38 +2,42 @@ import asyncio
 import json
 import logging
 import os
-from functools import cached_property, lru_cache
+from functools import cached_property
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Any, Union, Generator
 
-from dagster import DagsterLogManager, resource, Field
+import dagster as dg
+from pydantic import Field
+from dagster._core.execution.context.compute import OpExecutionContext
+
 from dagster_meltano.exceptions import MeltanoCommandError
-
 from dagster_meltano.job import Job
 from dagster_meltano.schedule import Schedule
 from dagster_meltano.utils import Singleton
-from dagster_shell import execute_shell_command
-
-STDOUT = 1
 
 
-class MeltanoResource(metaclass=Singleton):
-    def __init__(
-        self,
-        project_dir: str = None,
-        meltano_bin: Optional[str] = "meltano",
-        retries: int = 0,
-    ):
-        self.project_dir = str(project_dir)
-        self.meltano_bin = meltano_bin
-        self.retries = retries
-
+class MeltanoResource(dg.ConfigurableResource, metaclass=Singleton):
+    """A resource that corresponds to a Meltano project."""
+    
+    project_dir: str = Field(
+        default_factory=lambda: os.getenv("MELTANO_PROJECT_ROOT", os.getcwd()),
+        description="The path to the Meltano project."
+    )
+    meltano_bin: str = Field(
+        default="meltano", 
+        description="The path to the Meltano binary."
+    )
+    retries: int = Field(
+        default=0, 
+        description="The number of times to retry a failed job."
+    )
+    
     @property
-    def default_env(self) -> Dict[str, str]:
+    def default_env(self) -> dict[str, str]:
         """The default environment to use when running Meltano commands.
 
         Returns:
-            Dict[str, str]: The environment variables.
+            dict[str, str]: The environment variables.
         """
         return {
             "MELTANO_CLI_LOG_CONFIG": str(Path(__file__).parent / "logging.yaml"),
@@ -45,40 +49,54 @@ class MeltanoResource(metaclass=Singleton):
     def execute_command(
         self,
         command: str,
-        env: Dict[str, str],
-        logger: Union[logging.Logger, DagsterLogManager] = logging.Logger,
+        env: dict[str, str],
+        logger: Union[logging.Logger, dg.DagsterLogManager, None] = None,
     ) -> str:
         """Execute a Meltano command.
 
         Args:
-            context (OpExecutionContext): The Dagster execution context.
-            command (str): The Meltano command to execute.
-            env (Dict[str, str]): The environment variables to inject when executing the command.
+            command: The Meltano command to execute.
+            env: The environment variables to inject when executing the command.
+            logger: The logger to use.
 
         Returns:
             str: The output of the command.
         """
-        output, exit_code = execute_shell_command(
-            f"{self.meltano_bin} {command}",
-            env={**self.default_env, **env},
-            output_logging="STREAM",
-            log=logger,
-            cwd=self.project_dir,
-        )
+        if logger is None:
+            logger = dg.get_dagster_logger()
+            
+        full_command = f"{self.meltano_bin} {command}"
+        merged_env = {**self.default_env, **env}
+        
+        logger.info(f"Executing command: {full_command}")
 
+        client: dg.PipesSubprocessClient = dg.PipesSubprocessClient(
+            full_command,
+            env=merged_env,
+            cwd=self.project_dir,
+            write_unicode_logs=True,
+        )
+        
+        output = []
+        for line in client.get_output_lines():
+            output.append(line)
+            logger.info(line)
+            
+        exit_code = client.wait()
+        
         if exit_code != 0:
             raise MeltanoCommandError(
                 f"Command '{command}' failed with exit code {exit_code}"
             )
 
-        return output
+        return "\n".join(output)
 
-    async def load_json_from_cli(self, command: List[str]) -> dict:
+    async def load_json_from_cli(self, command: list[str]) -> dict[str, Any]:
         """Use the Meltano CLI to load JSON data.
         Use asyncio to run multiple commands concurrently.
 
         Args:
-            command (List[str]): The Meltano command to execute.
+            command: The Meltano command to execute.
 
         Returns:
             dict: The processed JSON data.
@@ -110,7 +128,7 @@ class MeltanoResource(metaclass=Singleton):
         return jobs, schedules
 
     @cached_property
-    def meltano_yaml(self) -> dict:
+    def meltano_yaml(self) -> dict[str, Any]:
         """Asynchronously load the Meltano jobs and schedules.
 
         Returns:
@@ -120,7 +138,7 @@ class MeltanoResource(metaclass=Singleton):
         return {"jobs": jobs["jobs"], "schedules": schedules["schedules"]}
 
     @cached_property
-    def meltano_jobs(self) -> List[Job]:
+    def meltano_jobs(self) -> list[Job]:
         meltano_job_list = self.meltano_yaml["jobs"]
         return [
             Job(
@@ -131,7 +149,7 @@ class MeltanoResource(metaclass=Singleton):
         ]
 
     @cached_property
-    def meltano_schedules(self) -> List[Schedule]:
+    def meltano_schedules(self) -> list[Schedule]:
         meltano_schedule_list = self.meltano_yaml["schedules"]["job"]
         schedule_list = [
             Schedule(meltano_schedule) for meltano_schedule in meltano_schedule_list
@@ -139,11 +157,11 @@ class MeltanoResource(metaclass=Singleton):
         return schedule_list
 
     @property
-    def meltano_job_schedules(self) -> Dict[str, Schedule]:
+    def meltano_job_schedules(self) -> dict[str, Schedule]:
         return {schedule.job_name: schedule for schedule in self.meltano_schedules}
 
     @property
-    def jobs(self) -> List[dict]:
+    def jobs(self) -> Generator[dict[str, Any], None, None]:
         for meltano_job in self.meltano_jobs:
             yield meltano_job.dagster_job
 
@@ -151,7 +169,8 @@ class MeltanoResource(metaclass=Singleton):
             yield meltano_schedule.dagster_schedule
 
 
-@resource(
+# Legacy resource definition for backward compatibility
+@dg.resource(
     description="A resource that corresponds to a Meltano project.",
     config_schema={
         "project_dir": Field(

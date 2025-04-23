@@ -10,6 +10,47 @@ You can install using `pip install dagster-meltano`.
 
 ## Examples
 
+### Using the modern Dagster Definitions pattern (Dagster 1.9/1.10+)
+
+An example of automatically loading all jobs and schedules from your Meltano project using the modern Definitions pattern:
+
+```python
+from dagster import Definitions
+from dagster_meltano import create_meltano_definitions
+
+# Create Definitions with all Meltano jobs and schedules
+defs = create_meltano_definitions(
+    meltano_project_dir="<path-to-meltano-root>",
+    retries=3
+)
+```
+
+You can also use the ConfigurableResource directly:
+
+```python
+from dagster import Definitions, job
+from dagster_meltano import MeltanoResource, meltano_run_op
+
+# Define a job using the MeltanoResource
+@job
+def meltano_run_job():
+    tap_done = meltano_run_op("tap-1 target-1")()
+    meltano_run_op("tap-2 target-2")(tap_done)
+
+# Create Definitions with the MeltanoResource
+defs = Definitions(
+    jobs=[meltano_run_job],
+    resources={
+        "meltano": MeltanoResource(
+            project_dir="<path-to-meltano-root>", 
+            retries=3
+        )
+    }
+)
+```
+
+### Legacy pattern (Dagster < 1.9)
+
 An example of automatically loading all jobs and schedules from your Meltano project.
 
 ```python

@@ -1,9 +1,14 @@
 import os
 import subprocess
 import pytest
-from dagster import job, op
+from dagster import job, op, Definitions
 
-from dagster_meltano import meltano_resource, meltano_run_op
+from dagster_meltano import (
+    meltano_resource, 
+    meltano_run_op, 
+    MeltanoResource,
+    create_meltano_definitions
+)
 
 from pathlib import Path
 
@@ -25,6 +30,20 @@ def meltano_run_job_with_env_op():
 
     injected_env = inject_env()
     meltano_run_op("tap-smoke-test target-jsonl")(env=injected_env)
+
+
+# Modern Definitions-based pattern
+def create_test_definitions():
+    @job
+    def modern_meltano_run_job():
+        meltano_run_op("tap-smoke-test target-jsonl")()
+    
+    return Definitions(
+        jobs=[modern_meltano_run_job],
+        resources={
+            "meltano": MeltanoResource(project_dir=MELTANO_PROJECT_TEST_PATH)
+        }
+    )
 
 
 def test_meltano_run():
@@ -55,6 +74,29 @@ def test_meltano_run_using_env_root():
     job_response = meltano_run_job.execute_in_process()
 
     assert job_response.success
+
+
+def test_meltano_run_with_definitions():
+    """
+    Check if we can run Meltano commands using the modern Definitions pattern.
+    """
+    defs = create_test_definitions()
+    job_response = defs.get_job("modern_meltano_run_job").execute_in_process()
+    
+    assert job_response.success
+
+
+def test_create_meltano_definitions():
+    """
+    Check if we can create Definitions from a Meltano project.
+    """
+    defs = create_meltano_definitions(meltano_project_dir=MELTANO_PROJECT_TEST_PATH)
+    
+    # Assert we have definitions with jobs and resources
+    assert defs.resources.get("meltano") is not None
+    
+    # Jobs are loaded from the Meltano project
+    assert len(defs.jobs) > 0
 
 
 def test_meltano_run_injecting_env():
