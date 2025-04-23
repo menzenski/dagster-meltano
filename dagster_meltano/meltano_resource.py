@@ -67,7 +67,7 @@ class MeltanoResource(dg.ConfigurableResource, metaclass=Singleton):
         full_command = f"{self.meltano_bin} {command}"
         merged_env = {**self.default_env, **env}
         
-        logger.info(f"Executing command: {full_command}")
+        logger.info(f"Executing command with PipesSubprocessClient: {full_command}")
 
         client: dg.PipesSubprocessClient = dg.PipesSubprocessClient(
             full_command,
