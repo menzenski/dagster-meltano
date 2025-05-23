@@ -6,7 +6,7 @@ from functools import cached_property, lru_cache
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 
-from dagster import DagsterLogManager, resource, Field, PipesSubprocessClient
+from dagster import DagsterLogManager, resource, Field, PipesSubprocessClient, AssetExecutionContext
 from dagster_meltano.exceptions import MeltanoCommandError
 
 from dagster_meltano.job import Job
@@ -64,25 +64,22 @@ class MeltanoResource(metaclass=Singleton):
         logger.info(f"Executing command with PipesSubprocessClient: {full_command}")
 
         client: PipesSubprocessClient = PipesSubprocessClient(
-            full_command,
             env=merged_env,
             cwd=self.project_dir,
-            write_unicode_logs=True,
+            context_injector=None,
+        )
+        context = AssetExecutionContext.get()
+        client.run(
+            command=full_command,
+            context=context,
         )
         
-        output = []
-        for line in client.get_output_lines():
-            output.append(line)
-            logger.info(line)
-            
-        exit_code = client.wait()
-        
-        if exit_code != 0:
-            raise MeltanoCommandError(
-                f"Command '{command}' failed with exit code {exit_code}"
-            )
+        # if exit_code != 0:
+        #     raise MeltanoCommandError(
+        #         f"Command '{command}' failed with exit code {exit_code}"
+        #     )
 
-        return "\n".join(output)
+        return ""
 
     async def load_json_from_cli(self, command: List[str]) -> dict:
         """Use the Meltano CLI to load JSON data.
