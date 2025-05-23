@@ -1,12 +1,10 @@
-from typing import Any
-
-import dagster as dg
+from dagster import DefaultScheduleStatus, ScheduleDefinition
 
 from dagster_meltano.utils import generate_dagster_name
 
 
 class Schedule:
-    def __init__(self, meltano_schedule: dict[str, Any]) -> None:
+    def __init__(self, meltano_schedule: dict) -> None:
         self.name = meltano_schedule["name"]
         self.cron_interval = meltano_schedule["cron_interval"]
         self.job_name = meltano_schedule["job"]["name"]
@@ -20,10 +18,10 @@ class Schedule:
         return generate_dagster_name(self.job_name)
 
     @property
-    def dagster_schedule(self) -> dg.ScheduleDefinition:
-        return dg.ScheduleDefinition(
+    def dagster_schedule(self) -> ScheduleDefinition:
+        return ScheduleDefinition(
             name=self.dagster_name,
             job_name=self.dagster_job_name,
             cron_schedule=self.cron_interval,
-            default_status=dg.DefaultScheduleStatus.RUNNING,
+            default_status=DefaultScheduleStatus.RUNNING,
         )
